@@ -1,0 +1,81 @@
+version: 2
+experimental:
+  notify:
+    branches:
+      only:
+        - master
+references:
+  container_config: &container_config
+    docker:
+      - image: pottava/awscli:latest
+    working_directory: ~/working_dir
+
+  setup: &setup
+    run:
+      command:
+        - export CI_IP=`curl -s ifconfig.me`
+
+  git: &git
+    run:
+      command: |
+        git config user.email "admin@example.com"
+        git config user.name "circleci-bot"
+
+jobs:
+  authorize:
+    <<: *container_config
+    steps:
+      - *setup
+      - run:
+          command:
+            - aws ec2 authorize-security-group-ingress --group-id ${AWS_SECURITYGROUP} --protocol tcp --port 22 --cidr ${CI_IP}/32
+  revoke:
+    <<: *container_config
+    steps:
+      - *setup
+      - run:
+          command:
+            - aws ec2 revoke-security-group-ingress  --group-id ${AWS_SECURITYGROUP} --protocol tcp --port 22 --cidr ${CI_IP}/32
+
+  push:
+    <<: *container_config
+    steps:
+      - run:
+          command:
+            - ssh kusanagi@${HOSTING_SERVER} 'cd ~/${DOMAIN}/DocumentRoot && git add . && git commit -m "committed from hosting server" && git push origin latest'
+
+  merge:
+    machine: true
+    working_directory: ~/git
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "46:70:9d:0b:78:9e:cb:11:4c:43:34:e0:8d:b6:87:62"
+      - run:
+          command: |
+            git config --global user.email "hiroshi.k.1985@gmail.com"
+            git config --global user.name "hiroshik1985"
+            git clone git@github.com:hiroshik1985/somesite.git
+            cd somesite
+            if git diff master origin/latest --quiet; then
+              echo 'done'
+            else
+              echo 'found'
+              git merge origin/latest --no-edit
+              echo 'found2'
+              git push git@github.com:hiroshik1985/somesite.git master
+            fi
+
+
+  push:
+    <<: *container_config
+    steps:
+      - run:
+          command:
+            - ssh kusanagi@${HOSTING_SERVER} 'cd ~/${DOMAIN}/DocumentRoot && git pull origin master'
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - merge
